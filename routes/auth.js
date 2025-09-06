@@ -1,10 +1,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const { OAuth2Client } = require('google-auth-library');
 const router = express.Router();
-
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Signup Endpoint
 router.post('/signup', async (req, res) => {
@@ -55,63 +52,8 @@ router.get('/user', async (req, res) => {
   }
 });
 
-// Google Sign-In endpoint (unchanged)
-router.post('/google-auth', async (req, res) => {
-    const { idToken } = req.body;
-    try {
-        const ticket = await client.verifyIdToken({
-            idToken,
-            audience: process.env.GOOGLE_CLIENT_ID,
-        });
-        const payload = ticket.getPayload();
-        const { sub: googleId, email, name, picture } = payload;
-
-        let friend = await User.findOne({ googleId });
-        if (!friend) {
-            const existingUser = await User.findOne({ email });
-            if (existingUser) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'This email is already associated with another account!',
-                });
-            }
-            friend = new User({
-                googleId,
-                email,
-                username: name || email.split('@')[0],
-                picture,
-            });
-            await friend.save();
-        }
-
-        const key = jwt.sign(
-            { userId: friend._id, email: friend.email },
-            process.env.JWT_SECRET,
-            { expiresIn: '1h' }
-        );
-
-        res.json({
-            success: true,
-            key,
-            friend: {
-                id: friend._id,
-                username: friend.username,
-                email: friend.email,
-                picture: friend.picture,
-            },
-        });
-    } catch (error) {
-        console.error('Google login error:', error);
-        res.status(401).json({
-            success: false,
-            message: 'Invalid Google token or server error!',
-        });
-    }
-});
-
-
-
 module.exports = router;
+
 
 
 
