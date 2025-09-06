@@ -1,7 +1,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const { OAuth2Client } = require('google-auth-library');
+// const { OAuth2Client } = require('google-auth-library');
 const router = express.Router();
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -56,7 +56,7 @@ router.get('/user', async (req, res) => {
 });
 
 // Google Sign-In endpoint (unchanged)
-router.post('/google-login', async (req, res) => {
+router.post('/google-auth', async (req, res) => {
     const { idToken } = req.body;
     try {
         const ticket = await client.verifyIdToken({
@@ -112,4 +112,5 @@ router.post('/google-login', async (req, res) => {
 
 
 module.exports = router;
+
 
