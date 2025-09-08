@@ -113,29 +113,34 @@
 
 // module.exports = router;
 
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const axios = require('axios');
+const axios = require("axios");
 
-router.post('/initiate', async (req, res, next) => {
+// Initialize transaction
+router.post("/initiate", async (req, res, next) => {
   try {
     const { email, amount, address, cart } = req.body;
 
     if (!email || !amount) {
-      return res.status(400).json({ error: 'Email and amount required' });
+      return res.status(400).json({ error: "Email and amount required" });
+    }
+
+    if (!process.env.PAYSTACK_SECRET_KEY) {
+      console.error("Paystack secret key is missing!");
+      return res.status(500).json({ error: "Payment configuration error" });
     }
 
     const response = await axios.post(
       "https://api.paystack.co/transaction/initialize",
       {
         email,
-        amount,
+        amount: amount * 100, // convert to kobo
         metadata: { address, cart },
       },
       {
         headers: {
           Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          "Content-Type": "application/json",
         },
       }
     );
@@ -143,13 +148,21 @@ router.post('/initiate', async (req, res, next) => {
     res.json(response.data);
   } catch (err) {
     console.error("Payment init error:", err.response?.data || err.message);
-    next(err); // pass to error handler
+    res
+      .status(err.response?.status || 500)
+      .json(err.response?.data || { error: "Payment initialization failed" });
   }
 });
 
-router.get('/verify/:reference', async (req, res, next) => {
+// Verify transaction
+router.get("/verify/:reference", async (req, res, next) => {
   try {
     const { reference } = req.params;
+
+    if (!process.env.PAYSTACK_SECRET_KEY) {
+      console.error("Paystack secret key is missing!");
+      return res.status(500).json({ error: "Payment configuration error" });
+    }
 
     const response = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
@@ -163,9 +176,10 @@ router.get('/verify/:reference', async (req, res, next) => {
     res.json(response.data);
   } catch (err) {
     console.error("Payment verify error:", err.response?.data || err.message);
-    next(err);
+    res
+      .status(err.response?.status || 500)
+      .json(err.response?.data || { error: "Payment verification failed" });
   }
 });
 
 module.exports = router;
-
