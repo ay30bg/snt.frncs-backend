@@ -86,3 +86,19 @@ router.post('/webhook', async (req, res) => {
     }
 
     const { event, data } = req.body;
+
+    if (event === 'charge.success') {
+      const { reference, amount, customer, metadata } = data;
+      console.log(`Payment successful: Reference=${reference}, Amount=${amount / 100}, Email=${customer.email}`);
+      // Save to database (e.g., MongoDB)
+      // Example: await Order.create({ reference, amount: amount / 100, email: customer.email, metadata });
+    }
+
+    res.status(200).send('Webhook received');
+  } catch (error) {
+    console.error('Webhook error:', error.message);
+    res.status(500).json({ error: 'Webhook processing failed' });
+  }
+});
+
+module.exports = router;
