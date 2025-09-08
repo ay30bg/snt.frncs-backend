@@ -33,7 +33,7 @@ mongoose.connect(process.env.MONGO_URI, {
 
 // Routes
 app.use('/api/', authRoutes);
-app.use('/api/payment', paymentRoutes);
+app.use('/api/paystack', paymentRoutes);
 
 app.get('/', (req, res) => {
   res.json({ message: 'SNTFRNCS API' });
