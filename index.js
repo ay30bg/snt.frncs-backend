@@ -7,6 +7,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const authRoutes = require('./routes/auth');
+const paymentRoutes  = require('./routes/payment');
 
 const app = express();
 
@@ -33,6 +34,7 @@ mongoose.connect(process.env.MONGO_URI, {
 
 // Routes
 app.use('/api/', authRoutes);
+app.use('/api/payment', paymentRoutes);
 
 app.get('/', (req, res) => {
   res.json({ message: 'SNTFRNCS API' });
