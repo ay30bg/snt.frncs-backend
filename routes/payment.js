@@ -1,132 +1,114 @@
-const express = require('express');
-const axios = require('axios');
-const crypto = require('crypto');
+const express = require("express");
+const axios = require("axios");
+const Order = require("../models/Order");
+
 const router = express.Router();
-const Payment = require('../models/Payment');
 
-// Middleware to verify JWT (adapted from auth.js)
-const authMiddleware = async (req, res, next) => {
+const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
+
+// ✅ Initiate Transaction
+router.post("/initiate", async (req, res) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) return res.status(401).json({ message: 'No token provided' });
-    const decoded = require('jsonwebtoken').verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (error) {
-    res.status(401).json({ message: 'Invalid token', error: error.message });
-  }
-};
+    const { email, amount, address, cart } = req.body;
 
-// Initialize Transaction
-router.post('/initialize', authMiddleware, async (req, res) => {
-  try {
-    const { email, amount, fullName, phone } = req.body;
-
-    // Validate request
-    if (!email || !amount || !fullName || !phone) {
-      return res.status(400).json({ message: 'Please provide all required fields' });
-    }
-
-    // Convert amount to kobo
-    const amountInKobo = amount * 100;
-
-    // Initialize Paystack transaction
     const response = await axios.post(
-      'https://api.paystack.co/transaction/initialize',
+      "https://api.paystack.co/transaction/initialize",
       {
         email,
-        amount: amountInKobo,
-        currency: 'NGN',
-        metadata: { fullName, phone },
+        amount, // in kobo
+        metadata: { address, cart },
       },
       {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
       }
     );
 
-    // Save transaction
-    const payment = new Payment({
-      userId: req.user.userId,
-      fullName,
-      email,
-      phone,
-      amount,
-      reference: response.data.data.reference,
-    });
-    await payment.save();
-
-    res.status(201).json(response.data);
-  } catch (error) {
-    console.error('Initialization error:', error.response?.data || error.message);
-    res.status(500).json({ message: 'Server error during transaction initialization', error: error.message });
+    res.json(response.data);
+  } catch (err) {
+    console.error("Paystack Initiate Error:", err.response?.data || err.message);
+    res
+      .status(500)
+      .json({ error: err.response?.data || "Failed to initialize payment" });
   }
 });
 
-// Verify Transaction
-router.get('/verify/:reference', authMiddleware, async (req, res) => {
+// ✅ Verify Transaction
+router.get("/verify/:reference", async (req, res) => {
   try {
     const { reference } = req.params;
 
-    // Verify transaction with Paystack
     const response = await axios.get(
-      `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
+      `https://api.paystack.co/transaction/verify/${reference}`,
       {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
       }
     );
 
-    const { status, amount, metadata } = response.data.data;
+    const payment = response.data.data;
 
-    // Update payment status
-    const payment = await Payment.findOne({ reference });
-    if (payment) {
-      payment.status = status === 'success' ? 'success' : 'failed';
-      payment.updatedAt = Date.now();
-      await payment.save();
+    if (payment.status === "success") {
+      const orderData = {
+        reference: payment.reference,
+        email: payment.customer.email,
+        amount: payment.amount / 100, // convert from kobo to naira
+        cart: payment.metadata.cart,
+        address: payment.metadata.address,
+        status: "paid",
+      };
+
+      // ✅ Save order if not already in DB
+      let order = await Order.findOne({ reference: payment.reference });
+      if (!order) {
+        order = await Order.create(orderData);
+      }
+
+      res.json({ success: true, order });
+    } else {
+      res.json({ success: false });
     }
-
-    res.status(200).json(response.data);
-  } catch (error) {
-    console.error('Verification error:', error.response?.data || error.message);
-    res.status(500).json({ message: 'Server error during transaction verification', error: error.message });
+  } catch (err) {
+    console.error("Paystack Verify Error:", err.response?.data || err.message);
+    res
+      .status(500)
+      .json({ error: err.response?.data || "Payment verification failed" });
   }
 });
 
-// Webhook for Paystack Events
-router.post('/webhook', async (req, res) => {
-  try {
-    // Verify webhook signature
-    const hash = crypto
-      .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
-      .update(JSON.stringify(req.body))
-      .digest('hex');
-
-    if (hash !== req.headers['x-paystack-signature']) {
-      return res.status(400).json({ message: 'Invalid webhook signature' });
-    }
-
+// ✅ Webhook (for reliability)
+router.post(
+  "/webhook",
+  express.json({ type: "application/json" }),
+  async (req, res) => {
     const event = req.body;
-    if (event.event === 'charge.success') {
-      const { reference, amount, status } = event.data;
-      const payment = await Payment.findOne({ reference });
-      if (payment) {
-        payment.status = status;
-        payment.updatedAt = Date.now();
-        await payment.save();
+
+    if (event.event === "charge.success") {
+      const payment = event.data;
+
+      const orderData = {
+        reference: payment.reference,
+        email: payment.customer.email,
+        amount: payment.amount / 100,
+        cart: payment.metadata.cart,
+        address: payment.metadata.address,
+        status: "paid",
+      };
+
+      try {
+        let order = await Order.findOne({ reference: payment.reference });
+        if (!order) {
+          order = await Order.create(orderData);
+        } else {
+          order.status = "paid";
+          await order.save();
+        }
+        console.log("✅ Webhook Order Saved:", order.reference);
+      } catch (err) {
+        console.error("Webhook DB Error:", err.message);
       }
     }
 
-    res.status(200).send('Webhook received');
-  } catch (error) {
-    console.error('Webhook error:', error.message);
-    res.status(500).json({ message: 'Server error processing webhook', error: error.message });
+    res.sendStatus(200);
   }
-});
+);
 
 module.exports = router;
