@@ -327,6 +327,7 @@ router.post('/initialize', async (req, res) => {
   // Validate required fields
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!email || typeof email !== 'string' || !emailRegex.test(email)) {
+    console.log('Validation failed: Invalid email', { email });
     return res.status(400).json({
       status: false,
       message: 'A valid email address is required',
@@ -336,6 +337,7 @@ router.post('/initialize', async (req, res) => {
     });
   }
   if (!amount || isNaN(amount) || amount <= 0) {
+    console.log('Validation failed: Invalid amount', { amount });
     return res.status(400).json({
       status: false,
       message: 'A valid amount is required',
@@ -345,6 +347,7 @@ router.post('/initialize', async (req, res) => {
     });
   }
   if (!cart || !Array.isArray(cart) || cart.length === 0) {
+    console.log('Validation failed: Invalid cart', { cart });
     return res.status(400).json({
       status: false,
       message: 'A valid cart is required',
@@ -362,6 +365,7 @@ router.post('/initialize', async (req, res) => {
     !address.state ||
     !address.postalCode
   ) {
+    console.log('Validation failed: Invalid address', { address });
     return res.status(400).json({
       status: false,
       message: 'A complete address is required',
@@ -371,6 +375,7 @@ router.post('/initialize', async (req, res) => {
     });
   }
   if (!userId) {
+    console.log('Validation failed: Invalid userId', { userId });
     return res.status(400).json({
       status: false,
       message: 'User ID is required',
@@ -393,20 +398,21 @@ router.post('/initialize', async (req, res) => {
 
   try {
     // Make Paystack API request
-    console.log('Sending request to Paystack:', { email, amount: amount * 100, currency: 'NGN' });
+    const paystackPayload = {
+      email,
+      amount: amount * 100, // Convert to kobo
+      currency: 'NGN',
+      metadata: {
+        fullName: address.fullName,
+        phone: address.phone,
+        cart,
+        userId,
+      },
+    };
+    console.log('Sending request to Paystack:', paystackPayload);
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
-      {
-        email,
-        amount: amount * 100, // Convert to kobo
-        currency: 'NGN',
-        metadata: {
-          fullName: address.fullName,
-          phone: address.phone,
-          cart,
-          userId,
-        },
-      },
+      paystackPayload,
       {
         headers: {
           Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
@@ -442,7 +448,6 @@ router.post('/initialize', async (req, res) => {
     res.json({ authorization_url, access_code, reference });
   } catch (error) {
     console.error('Initialization error:', error.response?.data || error.message);
-    // Pass through Paystack's error status if available
     const status = error.response?.status || 500;
     res.status(status).json({
       status: false,
@@ -529,7 +534,7 @@ router.post('/webhook', async (req, res) => {
 
   if (hash !== req.headers['x-paystack-signature']) {
     console.error('Invalid webhook signature');
-    return res.status(401).json({ status: false, message: 'Invalid signature' });
+    return res.status(401).json({ status: 'failed', message: 'Invalid signature' });
   }
 
   const event = req.body;
