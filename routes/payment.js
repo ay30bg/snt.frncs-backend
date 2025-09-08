@@ -1,58 +1,26 @@
-// routes/payment.js
 const express = require('express');
 const axios = require('axios');
+const crypto = require('crypto');
 const router = express.Router();
-const Order = require('../models/Order'); // Import the Order model
 
-// Paystack secret key from environment variables
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 
-// Middleware to verify Paystack signature for webhooks
-const verifyPaystackSignature = (req, res, next) => {
-  const crypto = require('crypto');
-  const secret = PAYSTACK_SECRET_KEY;
-  const hash = crypto
-    .createHmac('sha512', secret)
-    .update(JSON.stringify(req.body))
-    .digest('hex');
-  if (hash !== req.headers['x-paystack-signature']) {
-    return res.status(401).json({ error: 'Invalid Paystack signature' });
-  }
-  next();
-};
-
-// Initialize Payment
+// Initialize Paystack transaction
 router.post('/initialize', async (req, res) => {
   try {
-    const { email, amount, cart, address, userId } = req.body;
+    const { email, amount, metadata } = req.body;
 
-    if (!email || !amount || !cart || !address) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (!email || !amount) {
+      return res.status(400).json({ error: 'Email and amount are required' });
     }
 
-    // Create an order in MongoDB
-    const order = new Order({
-      userId: userId || null, // Store userId if authenticated
-      address,
-      cart,
-      total: amount,
-      paymentStatus: 'pending',
-    });
-    await order.save();
-
-    // Initialize payment with Paystack
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
       {
         email,
         amount: amount * 100, // Convert to kobo
         currency: 'NGN',
-        reference: `order_${order._id}_${Date.now()}`,
-        metadata: {
-          orderId: order._id,
-          fullName: address.fullName,
-          phone: address.phone,
-        },
+        metadata, // Include metadata like fullName, phone, address, cart
       },
       {
         headers: {
@@ -62,17 +30,15 @@ router.post('/initialize', async (req, res) => {
       }
     );
 
-    res.json({
-      authorization_url: response.data.data.authorization_url,
-      reference: response.data.data.reference,
-    });
+    const { authorization_url, access_code, reference } = response.data.data;
+    res.json({ authorization_url, access_code, reference });
   } catch (error) {
-    console.error('Payment initialization error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to initialize payment' });
+    console.error('Error initializing transaction:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to initialize transaction' });
   }
 });
 
-// Verify Payment
+// Verify Paystack transaction
 router.get('/verify/:reference', async (req, res) => {
   try {
     const { reference } = req.params;
@@ -87,45 +53,36 @@ router.get('/verify/:reference', async (req, res) => {
       }
     );
 
-    const paymentData = response.data.data;
-    if (paymentData.status === 'success') {
-      // Update order status in MongoDB
-      await Order.findOneAndUpdate(
-        { paymentReference: reference },
-        { paymentStatus: 'completed', paymentReference: reference }
-      );
-      res.json({ status: 'success', data: paymentData });
+    const { status, data } = response.data;
+    if (status && data.status === 'success') {
+      res.json({
+        status: 'success',
+        data: {
+          reference: data.reference,
+          amount: data.amount / 100, // Convert back to Naira
+          email: data.customer.email,
+          metadata: data.metadata,
+        },
+      });
     } else {
-      res.status(400).json({ status: 'failed', message: 'Payment not successful' });
+      res.status(400).json({ error: 'Payment verification failed', details: data });
     }
   } catch (error) {
-    console.error('Payment verification error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to verify payment' });
+    console.error('Error verifying transaction:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to verify transaction' });
   }
 });
 
-// Paystack Webhook
-router.post('/webhook', verifyPaystackSignature, async (req, res) => {
+// Webhook for Paystack events
+router.post('/webhook', async (req, res) => {
   try {
-    const event = req.body;
-    if (event.event === 'charge.success') {
-      const { reference, metadata } = event.data;
-      const order = await Order.findOneAndUpdate(
-        { _id: metadata.orderId, paymentReference: reference },
-        { paymentStatus: 'completed' },
-        { new: true }
-      );
-
-      if (!order) {
-        console.error('Order not found for webhook:', reference);
-        return res.status(404).json({ error: 'Order not found' });
-      }
+    // Verify webhook signature
+    const hash = crypto
+      .createHmac('sha512', PAYSTACK_SECRET_KEY)
+      .update(JSON.stringify(req.body))
+      .digest('hex');
+    if (hash !== req.headers['x-paystack-signature']) {
+      return res.status(400).json({ error: 'Invalid webhook signature' });
     }
-    res.status(200).send('Webhook received');
-  } catch (error) {
-    console.error('Webhook error:', error.message);
-    res.status(500).json({ error: 'Webhook processing failed' });
-  }
-});
 
-module.exports = router;
+    const { event, data } = req.body;
