@@ -7,11 +7,12 @@ const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 
 // Initialize Paystack transaction
 router.post('/initialize', async (req, res) => {
+  console.log('Initialize request body:', req.body); // Log request body for debugging
   try {
     const { email, amount, metadata } = req.body;
 
-    if (!email || !amount) {
-      return res.status(400).json({ error: 'Email and amount are required' });
+    if (!email || !amount || isNaN(amount) || amount <= 0) {
+      return res.status(400).json({ error: 'Valid email and amount (greater than 0) are required' });
     }
 
     const response = await axios.post(
@@ -20,7 +21,7 @@ router.post('/initialize', async (req, res) => {
         email,
         amount: amount * 100, // Convert to kobo
         currency: 'NGN',
-        metadata, // Include metadata like fullName, phone, address, cart
+        metadata,
       },
       {
         headers: {
