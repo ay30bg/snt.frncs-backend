@@ -21,7 +21,7 @@ const orderSchema = new mongoose.Schema({
   ],
   total: Number,
   paymentReference: String,
-  orderId: String,
+   orderId: { type: String, required: true, unique: true },
   status: { type: String, default: 'pending' },
   createdAt: { type: Date, default: Date.now },
 });
