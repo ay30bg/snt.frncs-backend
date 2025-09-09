@@ -1,25 +1,19 @@
 // routes/payment.js
-import express from "express";
-import axios from "axios";
-import dotenv from "dotenv";
-
-dotenv.config();
+const express = require("express");
+const axios = require("axios");
+const Order = require("../models/Order");
 
 const router = express.Router();
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
 
-// 🔹 Initialize Payment
-router.post("/initiate", async (req, res) => {
+// ✅ Initialize transaction
+router.post("/initialize", async (req, res) => {
   try {
-    const { email, amount, metadata } = req.body;
+    const { email, amount } = req.body;
 
     const response = await axios.post(
       "https://api.paystack.co/transaction/initialize",
-      {
-        email,
-        amount: amount * 100, // Paystack expects amount in kobo
-        metadata,
-      },
+      { email, amount },
       {
         headers: {
           Authorization: `Bearer ${PAYSTACK_SECRET}`,
@@ -28,43 +22,48 @@ router.post("/initiate", async (req, res) => {
       }
     );
 
-    res.json(response.data); // Send Paystack response to frontend
+    res.json(response.data);
   } catch (err) {
-    console.error(err.response?.data || err.message);
-    res.status(500).json({ error: "Payment initialization failed" });
+    console.error("Paystack Init Error:", err.response?.data || err.message);
+    res.status(500).json({ error: "Failed to initialize transaction" });
   }
 });
 
-// 🔹 Verify Payment
-router.get("/verify/:reference", async (req, res) => {
+// ✅ Verify transaction + Save Order
+router.post("/verify", async (req, res) => {
   try {
-    const { reference } = req.params;
+    const { reference, cart, address, total, userId } = req.body;
 
     const response = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
-        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
+        headers: {
+          Authorization: `Bearer ${PAYSTACK_SECRET}`,
+        },
       }
     );
 
-    res.json(response.data);
+    const data = response.data;
+
+    if (data.data.status === "success") {
+      const order = new Order({
+        user: userId || null, // optional, since no auth
+        cart,
+        address,
+        total,
+        paymentReference: reference,
+        status: "paid",
+      });
+
+      await order.save();
+      return res.json({ success: true, order });
+    }
+
+    res.status(400).json({ success: false, error: "Payment not verified" });
   } catch (err) {
-    console.error(err.response?.data || err.message);
-    res.status(500).json({ error: "Payment verification failed" });
+    console.error("Paystack Verify Error:", err.response?.data || err.message);
+    res.status(500).json({ error: "Failed to verify transaction" });
   }
 });
 
-// 🔹 Webhook (recommended for real-time updates)
-router.post("/webhook", (req, res) => {
-  const event = req.body;
-
-  // ⚠️ IMPORTANT: Verify Paystack signature before trusting the event
-  if (event.event === "charge.success") {
-    console.log("✅ Payment Successful:", event.data.reference);
-    // Save order to DB here
-  }
-
-  res.sendStatus(200);
-});
-
-export default router;
+module.exports = router;
