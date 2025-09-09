@@ -1,105 +1,70 @@
-const express = require('express');
-const axios = require('axios');
-const crypto = require('crypto');
+// routes/payment.js
+import express from "express";
+import axios from "axios";
+import dotenv from "dotenv";
+
+dotenv.config();
+
 const router = express.Router();
+const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
 
-const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
-
-// Initialize Paystack transaction
-router.post('/initialize', async (req, res) => {
-  console.log('Initialize request body:', req.body); // Log request body for debugging
+// 🔹 Initialize Payment
+router.post("/initiate", async (req, res) => {
   try {
     const { email, amount, metadata } = req.body;
 
-    if (!email || !amount || isNaN(amount) || amount <= 0) {
-      return res.status(400).json({ error: 'Valid email and amount (greater than 0) are required' });
-    }
-
     const response = await axios.post(
-      'https://api.paystack.co/transaction/initialize',
+      "https://api.paystack.co/transaction/initialize",
       {
         email,
-        amount: amount * 100, // Convert to kobo
-        currency: 'NGN',
+        amount: amount * 100, // Paystack expects amount in kobo
         metadata,
       },
       {
         headers: {
-          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
-          'Content-Type': 'application/json',
+          Authorization: `Bearer ${PAYSTACK_SECRET}`,
+          "Content-Type": "application/json",
         },
       }
     );
 
-    const { authorization_url, access_code, reference } = response.data.data;
-    res.json({ authorization_url, access_code, reference });
-  } catch (error) {
-    console.error('Error initializing transaction:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to initialize transaction' });
+    res.json(response.data); // Send Paystack response to frontend
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    res.status(500).json({ error: "Payment initialization failed" });
   }
 });
 
-// Verify Paystack transaction
-router.get('/verify/:reference', async (req, res) => {
+// 🔹 Verify Payment
+router.get("/verify/:reference", async (req, res) => {
   try {
     const { reference } = req.params;
 
     const response = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
-        headers: {
-          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
       }
     );
 
-    const { status, data } = response.data;
-    if (status && data.status === 'success') {
-      res.json({
-        status: 'success',
-        data: {
-          reference: data.reference,
-          amount: data.amount / 100, // Convert back to Naira
-          email: data.customer.email,
-          metadata: data.metadata,
-        },
-      });
-    } else {
-      res.status(400).json({ error: 'Payment verification failed', details: data });
-    }
-  } catch (error) {
-    console.error('Error verifying transaction:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to verify transaction' });
+    res.json(response.data);
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    res.status(500).json({ error: "Payment verification failed" });
   }
 });
 
-// Webhook for Paystack events
-router.post('/webhook', async (req, res) => {
-  try {
-    // Verify webhook signature
-    const hash = crypto
-      .createHmac('sha512', PAYSTACK_SECRET_KEY)
-      .update(JSON.stringify(req.body))
-      .digest('hex');
-    if (hash !== req.headers['x-paystack-signature']) {
-      return res.status(400).json({ error: 'Invalid webhook signature' });
-    }
+// 🔹 Webhook (recommended for real-time updates)
+router.post("/webhook", (req, res) => {
+  const event = req.body;
 
-    const { event, data } = req.body;
-
-    if (event === 'charge.success') {
-      const { reference, amount, customer, metadata } = data;
-      console.log(`Payment successful: Reference=${reference}, Amount=${amount / 100}, Email=${customer.email}`);
-      // Save to database (e.g., MongoDB)
-      // Example: await Order.create({ reference, amount: amount / 100, email: customer.email, metadata });
-    }
-
-    res.status(200).send('Webhook received');
-  } catch (error) {
-    console.error('Webhook error:', error.message);
-    res.status(500).json({ error: 'Webhook processing failed' });
+  // ⚠️ IMPORTANT: Verify Paystack signature before trusting the event
+  if (event.event === "charge.success") {
+    console.log("✅ Payment Successful:", event.data.reference);
+    // Save order to DB here
   }
+
+  res.sendStatus(200);
 });
 
-module.exports = router;
+export default router;
