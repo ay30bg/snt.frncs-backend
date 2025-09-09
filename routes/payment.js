@@ -1,68 +1,102 @@
-// routes/payment.js
-const express = require("express");
-const axios = require("axios");
-const Order = require("../models/Order");
-
+const express = require('express');
 const router = express.Router();
-const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
+const axios = require('axios');
+const Order = require('../models/Order'); // Import Order model
 
-// ✅ Initialize transaction
-router.post("/initialize", async (req, res) => {
-  try {
-    const { email, amount } = req.body;
+// Paystack API base URL
+const PAYSTACK_API = 'https://api.paystack.co';
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 
-    const response = await axios.post(
-      "https://api.paystack.co/transaction/initialize",
-      { email, amount },
-      {
-        headers: {
-          Authorization: `Bearer ${PAYSTACK_SECRET}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    res.json(response.data);
-  } catch (err) {
-    console.error("Paystack Init Error:", err.response?.data || err.message);
-    res.status(500).json({ error: "Failed to initialize transaction" });
+// Middleware to verify Paystack signature (for webhooks)
+const verifyPaystackSignature = (req, res, next) => {
+  const crypto = require('crypto');
+  const secret = PAYSTACK_SECRET_KEY;
+  const hash = crypto
+    .createHmac('sha512', secret)
+    .update(JSON.stringify(req.body))
+    .digest('hex');
+  if (hash === req.headers['x-paystack-signature']) {
+    next();
+  } else {
+    res.status(401).json({ error: 'Invalid Paystack signature' });
   }
-});
+};
 
-// ✅ Verify transaction + Save Order
-router.post("/verify", async (req, res) => {
+// Route to verify payment
+router.post('/verify/:reference', async (req, res) => {
+  const { reference } = req.params;
+  const { cart, total, address, email } = req.body; // Email sent from frontend
+
   try {
-    const { reference, cart, address, total, userId } = req.body;
+    const response = await axios.get(`${PAYSTACK_API}/transaction/verify/${reference}`, {
+      headers: {
+        Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    });
 
-    const response = await axios.get(
-      `https://api.paystack.co/transaction/verify/${reference}`,
-      {
-        headers: {
-          Authorization: `Bearer ${PAYSTACK_SECRET}`,
-        },
-      }
-    );
+    const { data } = response.data;
 
-    const data = response.data;
+    if (data.status === 'success') {
+      // Payment verified, create order
+      const orderId = Math.floor(Math.random() * 1000000).toString(); // Generate orderId
 
-    if (data.data.status === "success") {
       const order = new Order({
-        user: userId || null, // optional, since no auth
-        cart,
+        email: email || data.customer.email, // Fallback to Paystack's customer email
         address,
+        cart,
         total,
         paymentReference: reference,
-        status: "paid",
+        orderId,
+        status: 'completed',
       });
 
       await order.save();
-      return res.json({ success: true, order });
-    }
 
-    res.status(400).json({ success: false, error: "Payment not verified" });
-  } catch (err) {
-    console.error("Paystack Verify Error:", err.response?.data || err.message);
-    res.status(500).json({ error: "Failed to verify transaction" });
+      res.status(200).json({
+        message: 'Payment verified and order created',
+        order: {
+          orderId,
+          address,
+          cart,
+          total,
+          paymentReference: reference,
+        },
+      });
+    } else {
+      res.status(400).json({ error: 'Payment verification failed', details: data });
+    }
+  } catch (error) {
+    console.error('Error verifying payment:', error.message);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Webhook endpoint for Paystack events
+router.post('/webhook', verifyPaystackSignature, async (req, res) => {
+  const event = req.body;
+
+  if (event.event === 'charge.success') {
+    const { reference, amount, metadata } = event.data;
+    try {
+      // Find order by payment reference
+      const order = await Order.findOne({ paymentReference: reference });
+
+      if (order) {
+        order.status = 'completed';
+        await order.save();
+        console.log(`Order ${order.orderId} updated to completed`);
+      } else {
+        console.log(`No order found for reference: ${reference}`);
+      }
+
+      res.status(200).send('Webhook received');
+    } catch (error) {
+      console.error('Error processing webhook:', error.message);
+      res.status(500).json({ error: 'Webhook processing failed' });
+    }
+  } else {
+    res.status(200).send('Webhook received, no action taken');
   }
 });
 
