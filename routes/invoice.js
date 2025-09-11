@@ -86,6 +86,8 @@ const express = require('express');
 const router = express.Router();
 const nodemailer = require('nodemailer');
 const { jsPDF } = require('jspdf');
+const fs = require('fs');
+const path = require('path');
 
 // Nodemailer configuration
 const transporter = nodemailer.createTransport({
@@ -101,6 +103,12 @@ const sendInvoiceEmail = async ({ seller_email, order_id, customer_name, total, 
   try {
     // Generate PDF
     const doc = new jsPDF();
+    
+    // Add logo
+    const logoPath = path.join(__dirname, '../public/snt-frncs-new-logo.png');
+    const logoData = fs.readFileSync(logoPath).toString('base64');
+    doc.addImage(logoData, 'PNG', 14, 10, 40, 20);
+
     doc.setFontSize(16);
     doc.text('Snt.Francis Store', 60, 20);
     doc.setFontSize(18);
@@ -156,11 +164,10 @@ const sendInvoiceEmail = async ({ seller_email, order_id, customer_name, total, 
   }
 };
 
-// POST /api/invoice/send (for manual triggering, if needed)
+// POST /api/invoice/send
 router.post('/send', async (req, res) => {
   const { seller_email, order_id, customer_name, total, shipping_address, phone, items, cart } = req.body;
 
-  // Validate request body
   if (!order_id || !customer_name || !total || !shipping_address || !phone || !items || !cart) {
     return res.status(400).json({ error: 'Missing required order details' });
   }
@@ -182,4 +189,5 @@ router.post('/send', async (req, res) => {
   }
 });
 
-module.exports = { router, sendInvoiceEmail };
+module.exports = router; // Export router directly
+module.exports.sendInvoiceEmail = sendInvoiceEmail; // Export for potential future use
