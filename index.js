@@ -7,7 +7,7 @@ dotenv.config();
 
 const authRoutes = require('./routes/auth');
 const paymentRoutes  = require('./routes/payment');
-const invoiceRoutes = require('./routes/invoice');
+const notifyRoutes = require('./routes/notify'); 
 // const cartRoutes = require('./routes/cart');
 
 const app = express();
@@ -36,7 +36,7 @@ mongoose.connect(process.env.MONGO_URI, {
 // Routes
 app.use('/api/', authRoutes);
 app.use('/api/paystack', paymentRoutes);
-app.use('/api/invoice', invoiceRoutes);
+app.use('/api', notifyRoutes);
 // app.use('/api/cart', cartRoutes);
 
 app.get('/', (req, res) => {
