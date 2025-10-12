@@ -8,6 +8,7 @@ dotenv.config();
 const authRoutes = require('./routes/auth');
 const paymentRoutes  = require('./routes/payment');
 const notifyRoutes = require('./routes/notify'); 
+const productRoutes = require("./routes/products");
 // const cartRoutes = require('./routes/cart');
 
 const app = express();
@@ -37,6 +38,7 @@ mongoose.connect(process.env.MONGO_URI, {
 app.use('/api/', authRoutes);
 app.use('/api/paystack', paymentRoutes);
 app.use('/api', notifyRoutes);
+app.use("/api/products", productRoutes);
 // app.use('/api/cart', cartRoutes);
 
 app.get('/', (req, res) => {
