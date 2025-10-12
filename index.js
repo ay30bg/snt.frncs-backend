@@ -15,7 +15,7 @@ const app = express();
 
 // CORS configuration
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://snt-frncs.vercel.app', 'https://www.sntfrncs.store'],
+  origin: ['http://localhost:3000', 'https://snt-frncs.vercel.app', 'https://www.sntfrncs.store', 'https://sntfrncs-admin.vercel.app'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
