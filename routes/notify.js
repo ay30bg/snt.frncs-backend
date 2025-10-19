@@ -67,7 +67,7 @@ const transporter = nodemailer.createTransport({
 
 // ✅ POST: Save order and notify seller
 router.post('/notify-seller', async (req, res) => {
-  const { orderId, email, address, cart, total, paymentReference } = req.body;
+  const { orderId, email, address, cart, total } = req.body;
 
   if (!orderId || !email || !address || !cart || !total) {
     return res.status(400).json({ error: 'Missing required order details' });
